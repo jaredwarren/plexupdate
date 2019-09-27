@@ -1,5 +1,6 @@
 
 plex:
   locations:
-    video: ./video
-    movies: ./movies
+    video: E:\OtherVideos
+    movies: E:\Movies
+    music: E:\Music

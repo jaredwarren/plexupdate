@@ -58,9 +58,6 @@ func main() {
 	mux.HandleFunc("/youtube", Ytdl).Methods("GET")
 	mux.HandleFunc("/ytdl", YtdlHandler).Methods("POST")
 
-	fmt.Printf("%+v\n", mux.GetRoute(""))
-
-	return
 
 	exit := make(chan error)
 
