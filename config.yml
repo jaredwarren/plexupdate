@@ -1,5 +1,5 @@
 
 plex:
   locations:
-    video: /video/video/video
-    movies: /movies/movies/movies
+    video: ./video
+    movies: ./movies

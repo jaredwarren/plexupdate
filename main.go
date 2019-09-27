@@ -12,6 +12,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/gorilla/mux"
 	"github.com/jaredwarren/plexupdate/config"
 	"github.com/jaredwarren/plexupdate/form"
@@ -25,6 +26,7 @@ func main() {
 	// config
 	viper.SetConfigName("config")
 	viper.AddConfigPath(".")
+	viper.WatchConfig()
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
 	}
@@ -32,6 +34,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("unable to decode into struct, %v", err)
 	}
+
+	// Reload config on change
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		// reset config, so deleted values go away
+		conf = config.Configuration{}
+		// reload new config
+		err := viper.Unmarshal(&conf)
+		if err != nil {
+			log.Fatalf("unable to decode into struct, %v", err)
+		}
+	})
 
 	mux := mux.NewRouter()
 
@@ -44,6 +57,10 @@ func main() {
 
 	mux.HandleFunc("/youtube", Ytdl).Methods("GET")
 	mux.HandleFunc("/ytdl", YtdlHandler).Methods("POST")
+
+	fmt.Printf("%+v\n", mux.GetRoute(""))
+
+	return
 
 	exit := make(chan error)
 
@@ -89,9 +106,11 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	// parse every time to make updates easier, and save memory
 	tpl := template.Must(template.New("base").Funcs(template.FuncMap{"CsrfToken": CsrfToken}).ParseFiles("templates/upload.html", "templates/base.html"))
 	tpl.ExecuteTemplate(w, "base", &struct {
-		Title string
+		Title     string
+		Locations map[string]string
 	}{
-		Title: "User List",
+		Title:     "User List",
+		Locations: conf.Plex.Locations,
 	})
 }
 
@@ -128,7 +147,7 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// TODO: get dir
-	f, err := os.OpenFile(rootDir+handler.Filename, os.O_WRONLY|os.O_CREATE, 0666)
+	f, err := os.OpenFile(filepath.Join(rootDir, handler.Filename), os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
 		w.Write([]byte(" [E]:" + err.Error()))
 		return
@@ -153,9 +172,11 @@ func Ytdl(w http.ResponseWriter, r *http.Request) {
 	// parse every time to make updates easier, and save memory
 	templates := template.Must(template.ParseFiles("templates/ytdl.html", "templates/base.html"))
 	templates.ExecuteTemplate(w, "base", &struct {
-		Title string
+		Title     string
+		Locations map[string]string
 	}{
-		Title: "YTDL",
+		Title:     "YTDL",
+		Locations: conf.Plex.Locations,
 	})
 }
 
@@ -195,8 +216,8 @@ func YtdlHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Success:" + fileName))
 }
 
-func downloadVideo(id, rootPath string, audioOnly bool) (string, error) {
-	os.MkdirAll(rootPath, os.ModePerm)
+func downloadVideo(id, rootDir string, audioOnly bool) (string, error) {
+	os.MkdirAll(rootDir, os.ModePerm)
 
 	vid, err := ytdl.GetVideoInfo(id)
 	if err != nil {
@@ -209,7 +230,7 @@ func downloadVideo(id, rootPath string, audioOnly bool) (string, error) {
 	} else {
 		format = vid.Formats.Best("videnc")[0]
 	}
-	fileName := rootPath + SanitizeFilename(vid.Title, false) + "." + format.Extension
+	fileName := filepath.Join(rootDir, SanitizeFilename(vid.Title, false)+"."+format.Extension)
 	file, err := os.Create(fileName)
 	defer file.Close()
 	if err != nil {

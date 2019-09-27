@@ -40,8 +40,9 @@
             <div class="upload-btn-wrapper">
                 <label for="location">Location</label>
                 <select name="location" id="location">
-                    <option selected value="movies">Movies</option>
-                    <option value="other">Other</option>
+                    {{ range $key, $value := .Locations }}
+                    <option value="{{ $key }}">{{ $value }}</option>
+                    {{ end }}
                 </select>
             </div>
         </div>
