@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -96,6 +97,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 
 // UploadHandler ...
 func UploadHandler(w http.ResponseWriter, r *http.Request) {
+	var err error
 	fmt.Println("UploadHandler", r.URL.String())
 
 	// 3200 MB files max.
@@ -105,24 +107,19 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("MultipartForm:%+v", r.MultipartForm)
-	fmt.Printf("PostForm:%+v", r.PostForm)
-
+	// setup root dir
 	location := r.PostForm.Get("location")
-
-	fmt.Printf("%+v\n", location)
-
 	rootDir := conf.Plex.Locations[location]
-	if rootDir != "" {
-		fmt.Printf("rootDir:%+v\n", rootDir)
-	} else {
-		fmt.Println("????")
+	if rootDir == "" {
+		rootDir = "./uploads"
+	}
+	err = os.MkdirAll(rootDir, os.ModePerm)
+	if err != nil {
+		w.Write([]byte(" [E]:" + err.Error()))
+		return
 	}
 
-	return
-
 	// get form file
-	var err error
 	file, handler, err := r.FormFile("video_file")
 	if err != nil {
 		w.Write([]byte(" [E]:" + err.Error()))
@@ -131,13 +128,17 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// TODO: get dir
-	f, err := os.OpenFile("./"+handler.Filename, os.O_WRONLY|os.O_CREATE, 0666)
+	f, err := os.OpenFile(rootDir+handler.Filename, os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
 		w.Write([]byte(" [E]:" + err.Error()))
 		return
 	}
 	defer f.Close()
-	io.Copy(f, file)
+	_, err = io.Copy(f, file)
+	if err != nil {
+		w.Write([]byte(" [E]:" + err.Error()))
+		return
+	}
 
 	fmt.Println("  DONE!")
 	w.Write([]byte("DONE"))
@@ -172,8 +173,20 @@ func YtdlHandler(w http.ResponseWriter, r *http.Request) {
 
 	audioOnly := r.FormValue("audio") == "on"
 
+	// setup root dir
+	location := r.PostForm.Get("location")
+	rootDir := conf.Plex.Locations[location]
+	if rootDir == "" {
+		rootDir = "./uploads"
+	}
+	err := os.MkdirAll(rootDir, os.ModePerm)
+	if err != nil {
+		w.Write([]byte(" [E]:" + err.Error()))
+		return
+	}
+
 	// TODO: get dir...
-	fileName, err := downloadVideo(id, "./", audioOnly)
+	fileName, err := downloadVideo(id, rootDir, audioOnly)
 	if err != nil {
 		w.Write([]byte(" [E]:" + err.Error()))
 		return
@@ -292,4 +305,33 @@ func SanitizeFilename(name string, relativePath bool) string {
 // CsrfToken returns token
 func CsrfToken() string {
 	return form.New()
+}
+
+// IsDirEmpty ...
+func IsDirEmpty(name string) bool {
+	files, _ := ioutil.ReadDir(name)
+	return len(files) > 0
+}
+
+// CopyFile ...
+func CopyFile(source, dest string) error {
+	if exists := Exists(source); !exists {
+		return nil
+	}
+	input, err := ioutil.ReadFile(source)
+	if err != nil {
+		return err
+	}
+
+	err = ioutil.WriteFile(dest, input, 0644)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// Exists does file or directory exists?
+func Exists(filename string) bool {
+	_, err := os.Stat(filename)
+	return os.IsNotExist(err)
 }
