@@ -1,0 +1,84 @@
+{{define "title"}}{{end}}
+{{define "head"}}
+<style>
+    .main {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-top: 20px;
+    }
+
+    .main form {
+        border: 1px solid lightgray;
+        padding: 6px;
+
+    }
+
+    .delete {
+        text-decoration: none;
+        color: red;
+        font-weight: bold;
+    }
+</style>
+
+<script>
+
+</script>
+{{end}}
+
+{{define "body"}}
+{{template "nav" .}}
+<div class="main">
+    <form action="/ytdl" method="POST" class="pure-form pure-form-aligned" style="width: 80%">
+        <legend>YouTube</legend>
+        <div class="pure-control-group">
+            <label for="name">ID</label>
+            <input id="name" type="text" name="id" placeholder="ID / URL">
+            <!-- <span class="pure-form-message-inline">.</span> -->
+        </div>
+        <div class="pure-control-group">
+            <div class="upload-btn-wrapper">
+                <label for="location">Location</label>
+                <select name="location" id="location">
+                    <option selected value="movies">Movies</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+        </div>
+        <div class="pure-controls">
+            <label for="cb" class="pure-checkbox">
+                <input id="cb" type="checkbox" name="audio"> Audio Only
+            </label>
+
+            <button type="submit" class="pure-button pure-button-primary"><i class="fa fa-download"></i> Download</button>
+        </div>
+    </form>
+</div>
+{{end}}
+
+{{define "nav"}}
+<style>
+    nav {
+        padding: 5px;
+        border-bottom: 1px solid grey;
+        position: sticky;
+        top: 0;
+        right: 0;
+        left: 0;
+        display: flex;
+        align-items: stretch;
+    }
+
+    nav * {
+        margin: 4px;
+    }
+
+    .spacer {
+        width: 100%;
+    }
+</style>
+<nav>
+    <a href="/" class="pure-button"><i class="fas fa-home"></i> Home</a>
+    <span class="spacer">&nbsp;</span>
+</nav>
+{{end}}

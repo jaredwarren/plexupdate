@@ -38,15 +38,25 @@
 {{template "nav" .}}
 <div class="main">
     {{$csrfToken := CsrfToken}}
-    <form class="pure-form pure-form-stacked" action="/root/update?csrf_token={{$csrfToken}}" method="POST"
+    <form class="pure-form pure-form-stacked" action="/upload?csrf_token={{$csrfToken}}" method="POST"
         enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{$csrfToken}}">
         <fieldset>
-            <legend>Upload Package</legend>
+            <legend>Upload Video</legend>
             <div class="pure-control-group">
                 <div class="upload-btn-wrapper">
-                    <button type="button" class="button-secondary pure-button" onclick="document.getElementById('upfile').click();"><i class="far fa-images"></i> Select Files</button>
-                    <input id="upfile" type="file" name="package" />
+                    <button type="button" class="button-secondary pure-button" onclick="document.getElementById('upfile').click();"><i class="fas fa-file-video"></i> Select File</button>
+                    <input id="upfile" type="file" name="video_file" />
+                </div>
+            </div>
+
+            <div class="pure-control-group">
+                <div class="upload-btn-wrapper">
+                    <label for="location">Location</label>
+                    <select name="location" id="location" >
+                        <option selected value="movies">Movies</option>
+                        <option value="other">Other</option>
+                    </select>
                 </div>
             </div>
 
@@ -83,10 +93,7 @@
     }
 </style>
 <nav>
-    <!-- <a href="/pictures/upload" class="pure-button">Upload</a>
-    -->
-    <a href="/root" class="pure-button"><i class="fas fa-home"></i> Home</a>
+    <a href="/" class="pure-button"><i class="fas fa-home"></i> Home</a>
     <span class="spacer">&nbsp;</span>
-    <a href="/logout" class="pure-button"><i class="fa fa-sign-out-alt"></i> Logout</a>
 </nav>
 {{end}}
