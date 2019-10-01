@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,16 +15,25 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
+	"github.com/jaredwarren/plexupdate/command"
 	"github.com/jaredwarren/plexupdate/config"
 	"github.com/jaredwarren/plexupdate/form"
+	"github.com/jaredwarren/plexupdate/hub"
 	"github.com/rylio/ytdl"
 	"github.com/spf13/viper"
 )
 
 var conf config.Configuration
+var rooms map[string]*hub.Hub
 
 func main() {
+
+	rooms = make(map[string]*hub.Hub)
+
 	// config
+
+	// TODO: config name darwin, win, linux .....
 	viper.SetConfigName("config")
 	viper.AddConfigPath(".")
 	viper.WatchConfig()
@@ -58,6 +68,9 @@ func main() {
 	mux.HandleFunc("/youtube", Ytdl).Methods("GET")
 	mux.HandleFunc("/ytdl", YtdlHandler).Methods("POST")
 
+	// test
+	mux.HandleFunc("/test", Test).Methods("GET")
+	mux.HandleFunc("/ws", TestWS).Methods("GET")
 
 	exit := make(chan error)
 
@@ -81,6 +94,80 @@ func main() {
 	fmt.Printf("\nexiting (%v)\n", <-exit)
 	fmt.Println("Good Bye!")
 
+}
+
+// Test ...
+func Test(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Test", r.URL.String())
+
+	h := hub.NewHub()
+	go h.Run()
+
+	rooms[h.ID] = h
+
+	cmdClient := command.NewClient("ping 192.168.0.111")
+	cmdClient.Start()
+	cmdClient.Hub = h
+	h.Register(cmdClient)
+
+	go func() {
+		fmt.Println("  start ping")
+		cmd := exec.Command("ping", "192.168.0.111")
+
+		stdout, _ := cmd.StdoutPipe()
+		cmd.Start()
+
+		scanner := bufio.NewScanner(stdout)
+		scanner.Split(bufio.ScanLines)
+		for scanner.Scan() {
+			m := scanner.Text()
+			h.Broadcast(&hub.Message{
+				Sender: "stdout",
+				Type:   "message",
+				Action: "cmd",
+				Data:   fmt.Sprintln(m),
+			})
+			fmt.Println("    -> ", m)
+		}
+		cmd.Wait()
+		fmt.Println("  ping Done!")
+	}()
+
+	// parse every time to make updates easier, and save memory
+	tpl := template.Must(template.New("base").ParseFiles("templates/logs.html", "templates/base.html"))
+	tpl.ExecuteTemplate(w, "base", &struct {
+		Title string
+		Hub   *hub.Hub
+	}{
+		Title: "Home",
+		Hub:   h,
+	})
+}
+
+// TestWS ...
+func TestWS(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("TestWS", r.URL.String())
+	var upgrader = websocket.Upgrader{}
+
+	roomID := r.URL.Query().Get("room")
+	fmt.Println("  roomID:", roomID)
+
+	h, ok := rooms[roomID]
+	if !ok {
+		panic("room hub missing")
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		fmt.Println("  upgrade error:", err)
+		return
+	}
+
+	client := hub.NewClient("ws", conn)
+	client.Start()
+	client.Hub = h
+	// this whole startup process needs fixed.
+	h.Register(client)
 }
 
 // Home ...
