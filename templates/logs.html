@@ -3,6 +3,7 @@
 <link rel="stylesheet" href="/static/css/ansi.css">
 <script type="text/javascript">
     window.onload = function () {
+        return;
         var conn;
         var msg = document.getElementById("msg");
         var log = document.getElementById("log");
@@ -14,7 +15,7 @@
             }
         }
         if (window["WebSocket"]) {
-            var roomID = '{{.Hub.ID}}';
+            var roomID = '{{.Cmd.ID}}';
             conn = new WebSocket("ws://" + document.location.host + "/ws?room=" + roomID);
             conn.onclose = function (evt) {
                 var item = document.createElement("div");
@@ -140,6 +141,13 @@
         width: 100%;
     }
 </style>
+<nav>
+    <div class="bread"><a href="/"><i class="fa fa-home"></i></a></div>
+    <span class="spacer">&nbsp;</span>
+    <span class="title">{{.Title}}</span>
+    <span class="spacer">&nbsp;</span>
+    <a href="/logout" class="pure-button"><i class="fa fa-sign-out-alt"></i></a>
+</nav>
 <nav>
     <div class="bread"><a href="/"><i class="fa fa-home"></i></a></div>
     <span class="spacer">&nbsp;</span>

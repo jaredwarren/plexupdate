@@ -1,4 +1,4 @@
-package hub
+package socket
 
 import (
 	"bytes"
@@ -27,19 +27,27 @@ var (
 	space   = []byte{' '}
 )
 
+// Broadcaster ...
+type Broadcaster interface {
+	Broadcast(msg []byte)
+}
+
 // NewClient ...
-func NewClient(ID string, c *websocket.Conn) *Client {
-	return &Client{
+func NewClient(ID string, c *websocket.Conn, h Broadcaster) *Client {
+	client := &Client{
 		ID:   ID,
 		send: make(chan []byte, 256),
 		conn: c,
+		Hub:  h,
 	}
+	client.Start()
+	return client
 }
 
 // Client is a middleman between the websocket connection and the hub.
 type Client struct {
 	ID  string
-	Hub *Hub
+	Hub Broadcaster
 
 	// The websocket connection.
 	conn *websocket.Conn
@@ -58,30 +66,10 @@ func (c *Client) Send(msg []byte) {
 	c.send <- msg
 }
 
-// GetSend ...
-func (c *Client) GetSend() chan []byte {
-	return c.send
-}
-
-// GetName ...
-func (c *Client) GetName() string {
-	return "default"
-}
-
-// GetID ...
-func (c *Client) GetID() string {
-	return c.ID
-}
-
-// SetID ...
-func (c *Client) SetID(id string) {
-	c.ID = id
-}
-
 // Start ...
 func (c *Client) Start() {
 	go c.writePump()
-	go c.readPump()
+	c.readPump()
 }
 
 // readPump pumps messages from the websocket connection to the hub.
@@ -91,7 +79,7 @@ func (c *Client) Start() {
 // reads from this goroutine.
 func (c *Client) readPump() {
 	defer func() {
-		c.Hub.unregister <- c
+		// c.Hub.Unregister(c)
 		c.conn.Close()
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
@@ -106,10 +94,7 @@ func (c *Client) readPump() {
 			break
 		}
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-
-		// message := NewMessage(messageString)
-
-		c.Hub.broadcast <- message
+		c.Hub.Broadcast(message)
 	}
 }
 
@@ -138,7 +123,6 @@ func (c *Client) writePump() {
 			if err != nil {
 				return
 			}
-			// data, err := message.Marshal()
 			w.Write(message)
 
 			// Add queued messages to the current websocket message.
@@ -159,3 +143,19 @@ func (c *Client) writePump() {
 		}
 	}
 }
+
+// // ServeWS handles websocket requests from the peer.
+// func ServeWS(hub *hub.Hub, w http.ResponseWriter, r *http.Request) {
+// 	conn, err := upgrader.Upgrade(w, r, nil)
+// 	if err != nil {
+// 		log.Println(err)
+// 		return
+// 	}
+// 	client := &Client{Hub: hub, conn: conn, send: make(chan []byte, 256)}
+// 	client.Hub.register <- client
+
+// 	// Allow collection of memory referenced by the caller by doing all work in
+// 	// new goroutines.
+// 	go client.writePump()
+// 	go client.readPump()
+// }

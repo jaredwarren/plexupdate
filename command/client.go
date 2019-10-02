@@ -1,22 +1,22 @@
 package command
 
 import (
+	"bufio"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
-
-	"github.com/jaredwarren/plexupdate/hub"
 )
 
 // Client is a middleman between the websocket connection and the hub.
 type Client struct {
-	ID  string
-	Hub *hub.Hub
+	ID string
 
 	cmd *exec.Cmd
 
 	// Buffered channel of outbound messages.
-	send chan []byte
+	StdOut chan string
+	StdErr chan string
 
 	stop chan bool
 
@@ -24,11 +24,21 @@ type Client struct {
 }
 
 // NewClient ...
-func NewClient(command string) *Client {
+func NewClient(commandString string) *Client {
+	// TODO: optional pwd, env, ...
 	pwd, _ := os.Getwd()
+
+	// use base64 of command as ID, might be faster to get random, or use time.
+	// Another idea, use mutex to ensure get_timestamp is unique
+	bs := base64.StdEncoding.EncodeToString([]byte(commandString))
+
 	c := &Client{
-		send: make(chan []byte, 256),
-		pwd:  pwd,
+		ID:     string(bs),
+		StdOut: make(chan string, 256),
+		StdErr: make(chan string, 256),
+		pwd:    pwd,
+		cmd:    exec.Command("bash", "-c", commandString),
+		stop:   make(chan bool),
 	}
 
 	go c.Start()
@@ -36,95 +46,44 @@ func NewClient(command string) *Client {
 	return c
 }
 
-// Close ...
+// Close everying
 func (c *Client) Close() {
 	fmt.Println("Closing cmd.Client")
 	c.cmd.Process.Kill()
-	close(c.send)
+	close(c.StdErr)
+	close(c.StdOut)
+	close(c.stop)
 }
 
-// Send ...
-func (c *Client) Send(msg []byte) {
-
-	// TODO: run command
-
-	fmt.Println("TODO: run  command:", string(msg))
-	c.send <- msg
-}
-
-// GetSend ...
-func (c *Client) GetSend() chan []byte {
-	return c.send
-}
-
-// GetName ...
-func (c *Client) GetName() string {
-	return "cmd"
-}
-
-// GetID ...
-func (c *Client) GetID() string {
-	return c.ID
-}
-
-// SetID ...
-func (c *Client) SetID(id string) {
-	c.ID = id
-}
-
-// Start ...
+// Start command and write to StdOut and StdErr
 func (c *Client) Start() {
-	for {
-		select {
-		case <-c.stop:
-			c.Close()
-			return
-		case msgString := <-c.send:
-			msg := hub.NewMessage(msgString)
-			if msg.Sender == c.ID {
-				continue
-			}
-			c.RunCmd(msg)
+	fmt.Println("  start cmd:", c.ID)
+
+	stdout, _ := c.cmd.StdoutPipe()
+	stderr, _ := c.cmd.StderrPipe()
+	c.cmd.Start()
+
+	// scan stderr
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		scanner.Split(bufio.ScanLines)
+		for scanner.Scan() {
+			c.StdErr <- scanner.Text()
 		}
+	}()
+
+	// scan stdout
+	scanner := bufio.NewScanner(stdout)
+	scanner.Split(bufio.ScanLines)
+	for scanner.Scan() {
+		c.StdOut <- scanner.Text()
 	}
+
+	c.cmd.Wait()
+	fmt.Println("  cmd Done!", c.ID)
 }
 
-// TODO: creat option to run query
-
-// TODO: add reminder tool...
-
-// TODO: add upload file and/or download file
-
-// RunCmd ...
-func (c *Client) RunCmd(msg *hub.Message) {
-	cmd := fmt.Sprintf("%v", msg.Data)
-	// if cmd == "cd ...?" {
-	// 	c.pwd = cmd
-	// }
-	// fmt.Println("TODO: run  command:", string(msg))
-	out, err := RunBash(cmd, "", nil)
-	if err != nil {
-		c.Hub.Broadcast(&hub.Message{
-			Sender: c.ID,
-			Type:   "error",
-			Action: cmd,
-			Data:   err.Error(),
-		})
-	}
-
-	fmt.Println(" # ", c, out, err)
-
-	// TODO: cleanup logs
-	//  - fix scrolling on cmd page!!!
-	//  - output err too...
-	//  - test vpn?
-	//  - this whole thing might not be worth it...
-
-	c.Hub.Broadcast(&hub.Message{
-		Sender: c.ID,
-		Type:   "message",
-		Action: cmd,
-		Data:   out,
-	})
-	// c.Hub.Broadcast([]byte(out))
+// Broadcast used to receive message from ws, or other client/hub
+func (c *Client) Broadcast(msg []byte) {
+	fmt.Printf("---> Message::::::%s\n", msg)
 }

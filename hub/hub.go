@@ -14,10 +14,6 @@ func init() {
 type IClient interface {
 	Close()
 	Send(msg []byte)
-	GetSend() chan []byte
-	GetName() string
-	SetID(id string)
-	GetID() string
 }
 
 // Hub maintains the set of active clients and broadcasts messages to the
@@ -36,7 +32,7 @@ type Hub struct {
 	// Unregister requests from clients.
 	unregister chan IClient
 
-	index int
+	// index int
 }
 
 // Broadcast ...
@@ -46,10 +42,13 @@ func (h *Hub) Broadcast(msg Marshaler) {
 }
 
 // Register ...
-func (h *Hub) Register(client IClient) {
-	client.SetID(fmt.Sprintf("ID%d", h.index))
-	h.index++
-	h.register <- client
+func (h *Hub) Register(c IClient) {
+	h.register <- c
+}
+
+// Unregister ...
+func (h *Hub) Unregister(c IClient) {
+	h.unregister <- c
 }
 
 // NewHub ...
@@ -76,14 +75,7 @@ func (h *Hub) Run() {
 			}
 		case message := <-h.broadcast:
 			for client := range h.clients {
-				send := client.GetSend()
-				select {
-				case send <- message:
-					fmt.Println(">>(", client.GetName(), ")", string(message))
-				default:
-					client.Close()
-					delete(h.clients, client)
-				}
+				go client.Send(message)
 			}
 		}
 	}
