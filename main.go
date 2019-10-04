@@ -11,23 +11,24 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/jaredwarren/plexupdate/command"
 	"github.com/jaredwarren/plexupdate/config"
+	"github.com/jaredwarren/plexupdate/filesystem"
 	"github.com/jaredwarren/plexupdate/form"
-	"github.com/jaredwarren/plexupdate/socket"
 	"github.com/rylio/ytdl"
 	"github.com/spf13/viper"
 )
 
 var conf config.Configuration
-var rooms map[string]*command.Client
+var runningCommands map[string]*command.Command
 
 func main() {
-	rooms = make(map[string]*command.Client)
+	runningCommands = make(map[string]*command.Command)
 
 	// config
 
@@ -66,9 +67,11 @@ func main() {
 	mux.HandleFunc("/youtube", Ytdl).Methods("GET")
 	mux.HandleFunc("/ytdl", YtdlHandler).Methods("POST")
 
-	// test
-	mux.HandleFunc("/test", Test).Methods("GET")
-	mux.HandleFunc("/ws", TestWS).Methods("GET")
+	// command
+	mux.HandleFunc("/cmd", CommandList).Methods("GET")
+	mux.HandleFunc("/cmd/{id}", Command).Methods("GET")
+	mux.HandleFunc("/cmd/{id}", CommandHandler).Methods("POST")
+	mux.HandleFunc("/cmd/ws/{id}", CmdWS).Methods("GET")
 
 	exit := make(chan error)
 
@@ -94,51 +97,345 @@ func main() {
 
 }
 
-// Test ...
-func Test(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Test", r.URL.String())
+// CommandList ...
+func CommandList(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("CommandList", r.URL.String())
 
-	cmdClient := command.NewClient("ping 192.168.0.111")
+	// TODO: get previous and current commands...
+	files, err := ioutil.ReadDir("./logs")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// store for later, so ws can find it
-	rooms[cmdClient.ID] = cmdClient
+	commands := []*command.Command{}
+	for _, f := range files {
+		fileName := f.Name()
+		var ok bool
+		cmd, ok := runningCommands[fileName]
+		if !ok {
+			cmd = command.LoadFile(fileName)
+			cmd.Running = false
+		}
 
-	go func() {
-		cmdClient.Start()
-	}()
+		commands = append(commands, cmd)
+		fmt.Println(f.Name())
+	}
 
 	// parse every time to make updates easier, and save memory
-	tpl := template.Must(template.New("base").ParseFiles("templates/logs.html", "templates/base.html"))
+	tpl := template.Must(template.New("base").ParseFiles("templates/cmd/command_list.html", "templates/base.html"))
 	tpl.ExecuteTemplate(w, "base", &struct {
-		Title string
-		Cmd   *command.Client
+		Title    string
+		Commands []*command.Command
 	}{
-		Title: "Home",
-		Cmd:   cmdClient,
+		Title:    "Home",
+		Commands: commands,
 	})
 }
 
-// TestWS ...
-func TestWS(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("TestWS", r.URL.String())
-	var upgrader = websocket.Upgrader{}
+// Command shows start command form for "new" commands, and logs for old/done
+func Command(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Command", r.URL.String())
 
-	roomID := r.URL.Query().Get("room")
-	fmt.Println("  roomID:", roomID)
+	vars := mux.Vars(r)
+	cmdID := vars["id"]
 
-	cmd, ok := rooms[roomID]
-	if !ok {
-		panic("room cmd missing::" + roomID)
-	}
-
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println(err)
+	if cmdID == "" {
+		w.Write([]byte("ID Missing:" + cmdID))
 		return
 	}
-	socketClient := socket.NewClient(cmd.ID, conn, cmd)
-	socketClient.Start()
+
+	if cmdID == "new" {
+		// parse every time to make updates easier, and save memory
+		tpl := template.Must(template.New("base").ParseFiles("templates/cmd/command.html", "templates/base.html"))
+		tpl.ExecuteTemplate(w, "base", &struct {
+			Title string
+		}{
+			Title: "Home",
+		})
+	} else {
+		var cmd *command.Command
+		var ok bool
+		cmd, ok = runningCommands[cmdID]
+		if !ok {
+			filePath := fmt.Sprintf("./logs/%s.out", cmdID)
+			if filesystem.Exists(filePath) {
+				cmd = &command.Command{
+					ID:      cmdID,
+					Running: false,
+					LogFile: filePath,
+				}
+			} else {
+				w.Write([]byte("Log Missing:" + cmdID))
+				return
+			}
+		}
+
+		if cmd == nil {
+			w.Write([]byte("cmd Missing:" + cmdID))
+			return
+		}
+
+		// load file contents first
+		fileData, _ := ioutil.ReadFile(cmd.LogFile)
+
+		// parse every time to make updates easier, and save memory
+		tpl := template.Must(template.New("base").ParseFiles("templates/cmd/logs.html", "templates/base.html"))
+		tpl.ExecuteTemplate(w, "base", &struct {
+			Title    string
+			Cmd      *command.Command
+			FileData string
+		}{
+			Title:    "Home",
+			Cmd:      cmd,
+			FileData: string(fileData),
+		})
+	}
 }
+
+// CommandHandler ...
+func CommandHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("CommandHandler", r.URL.String())
+
+	vars := mux.Vars(r)
+	cmdID := vars["id"]
+	if cmdID != "" {
+		cmdID = "new"
+	}
+
+	if cmdID != "new" {
+		http.Redirect(w, r, "/cmd/"+cmdID, http.StatusSeeOther)
+		return
+	}
+
+	r.ParseForm()
+
+	c := r.FormValue("cmd")
+	d := r.FormValue("dir")
+	fmt.Println(">>>", d, c)
+
+	// TODO: check if command is being run already?
+
+	// store for later, so ws can find it
+	cmd := command.NewCommand("ping 192.168.0.111")
+	runningCommands[cmd.ID] = cmd
+
+	// start command now, so
+	go cmd.Start()
+
+	http.Redirect(w, r, "/cmd/"+cmd.ID, http.StatusSeeOther)
+}
+
+// TODO: make page to list commands, running and finished
+// TODO: make handler to show command output, running and finished, whthout running again...
+//   - rename file to something like .done.out, when done?
+// TODO: fix ws to read the file
+//  - https://stackoverflow.com/questions/10135738/reading-log-files-as-theyre-updated-in-go
+
+const (
+	// Time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
+
+	// Maximum message size allowed from peer.
+	maxMessageSize = 8192
+
+	// Time allowed to read the next pong message from the peer.
+	pongWait = 60 * time.Second
+
+	// Send pings to peer with this period. Must be less than pongWait.
+	pingPeriod = (pongWait * 9) / 10
+
+	// Time to wait before force close on connection.
+	closeGracePeriod = 10 * time.Second
+)
+
+var (
+	newline = []byte{'\n'}
+	space   = []byte{' '}
+)
+
+// CmdWS ...
+func CmdWS(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("TestWS", r.URL.String())
+	vars := mux.Vars(r)
+	cmdID := vars["id"]
+
+	cmd, ok := runningCommands[cmdID]
+	if !ok {
+		w.Write([]byte("Cmd not found:" + cmdID))
+	}
+
+	// Web socket
+	var upgrader = websocket.Upgrader{}
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("upgrade:", err)
+		return
+	}
+	defer ws.Close()
+
+	done := make(chan bool)
+	go ping(ws, done)
+	go pumpStdIn(ws, cmd)
+
+	pumpStdOut(ws, cmd, done)
+
+	//
+	// old
+	//
+
+	// roomID := r.URL.Query().Get("room")
+	// fmt.Println("  roomID:", roomID)
+
+	// cmd, ok := rooms[roomID]
+	// if !ok {
+	// 	panic("room cmd missing::" + roomID)
+	// }
+
+	// stdoutDone := make(chan bool)
+	// go pumpStdOut(ws, outr, stdoutDone)
+
+	// pumpStdIn(ws, proc)
+
+	// // Some commands will exit when stdin is closed.
+	// ws.Close()
+	// inw.Close()
+
+	// // Other commands need a bonk on the head.
+	// if err := proc.Signal(os.Interrupt); err != nil {
+	// 	fmt.Println("inter:", err)
+	// }
+
+	// select {
+	// case <-stdoutDone:
+	// case <-time.After(time.Second):
+	// 	// A bigger bonk on the head.
+	// 	if err := proc.Signal(os.Kill); err != nil {
+	// 		fmt.Println("term:", err)
+	// 	}
+	// 	<-stdoutDone
+	// }
+
+	// if _, err := proc.Wait(); err != nil {
+	// 	fmt.Println("wait:", err)
+	// }
+}
+
+func pumpStdIn(ws *websocket.Conn, cmd *command.Command) {
+	ws.SetReadLimit(maxMessageSize)
+	ws.SetReadDeadline(time.Now().Add(pongWait))
+	ws.SetPongHandler(func(string) error { ws.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	for {
+		_, message, err := ws.ReadMessage()
+		if err != nil {
+			fmt.Println("ReadMessage:", err)
+			break
+		}
+		action := string(message)
+		fmt.Println(" <<<<< ", action)
+		if action == "kill" {
+			cmd.Cmd.Process.Kill()
+			return
+		}
+	}
+}
+
+func pumpStdOut(ws *websocket.Conn, cmd *command.Command, done chan bool) {
+	// TODO: move most of this to filesystem.Watch, return io.Reader compatable struct
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer watcher.Close()
+
+	err = watcher.Add(cmd.LogFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	file, err := os.Open(cmd.LogFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	// get the size
+	fi, err := file.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+	oldSize := fi.Size()
+
+	// // write whole file to ws
+	// fb := make([]byte, oldSize)
+	// _, err = file.Read(fb)
+	// if err := ws.WriteMessage(websocket.TextMessage, fb); err != nil {
+	// 	fmt.Printf("%+v\n", err)
+	// }
+
+	for {
+		select {
+		case event := <-watcher.Events:
+			if event.Op&fsnotify.Write == fsnotify.Write {
+				ws.SetWriteDeadline(time.Now().Add(writeWait))
+
+				// get last x bytes of file and write to web socket
+				fi, err := file.Stat()
+				if err != nil {
+					log.Fatal(err)
+				}
+				size := fi.Size()
+				sizeDif := (size - oldSize)
+				if sizeDif > 0 {
+					buf := make([]byte, sizeDif)
+					start := size - sizeDif
+					_, err = file.ReadAt(buf, start)
+					if err == nil {
+						// fmt.Printf("  - %s\n", buf)
+						if err := ws.WriteMessage(websocket.TextMessage, buf); err != nil {
+							fmt.Println("WriteMessage:", err)
+							ws.Close()
+							break
+						}
+					}
+
+					// reset old size
+					oldSize = size
+				}
+			}
+		case <-done:
+			return
+		}
+	}
+
+	// close(done)
+
+	// ws.SetWriteDeadline(time.Now().Add(writeWait))
+	// ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	// time.Sleep(closeGracePeriod)
+}
+
+// I think this just keeps the websocket connection alive
+func ping(ws *websocket.Conn, done chan bool) {
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := ws.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(writeWait)); err != nil {
+				fmt.Println("ping:", err)
+			}
+		case <-done:
+			return
+		}
+	}
+}
+
+//
+//
+//
+//
+//
+//
 
 // Home ...
 func Home(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +581,7 @@ func downloadVideo(id, rootDir string, audioOnly bool) (string, error) {
 	} else {
 		format = vid.Formats.Best("videnc")[0]
 	}
-	fileName := filepath.Join(rootDir, SanitizeFilename(vid.Title, false)+"."+format.Extension)
+	fileName := filepath.Join(rootDir, filesystem.SanitizeFilename(vid.Title, false)+"."+format.Extension)
 	file, err := os.Create(fileName)
 	defer file.Close()
 	if err != nil {
@@ -320,60 +617,6 @@ func convertVideoToMP3(videoPath string) (string, error) {
 	return audioPath, err
 }
 
-var badCharacters = []string{
-	"../",
-	"<!--",
-	"-->",
-	"<",
-	">",
-	"'",
-	"\"",
-	"&",
-	"$",
-	"#",
-	"{", "}", "[", "]", "=",
-	";", "?", "%20", "%22",
-	"%3c",   // <
-	"%253c", // <
-	"%3e",   // >
-	"",      // > -- fill in with % 0 e - without spaces in between
-	"%28",   // (
-	"%29",   // )
-	"%2528", // (
-	"%26",   // &
-	"%24",   // $
-	"%3f",   // ?
-	"%3b",   // ;
-	"%3d",   // =
-}
-
-// SanitizeFilename ...
-func SanitizeFilename(name string, relativePath bool) string {
-	if name == "" {
-		return name
-	}
-
-	// if relativePath is TRUE, we preserve the path in the filename
-	// If FALSE and will cause upper path foldername to merge with filename
-	// USE WITH CARE!!!
-	badDictionary := badCharacters
-	if !relativePath {
-		// add additional bad characters
-		badDictionary = append(badCharacters, "./", "/")
-	}
-
-	// trim white space
-	trimmed := strings.TrimSpace(name)
-
-	// trim bad chars
-	temp := trimmed
-	for _, badChar := range badDictionary {
-		temp = strings.Replace(temp, badChar, "", -1)
-	}
-	stripped := strings.Replace(temp, "\\", "", -1)
-	return stripped
-}
-
 //
 //
 //
@@ -382,31 +625,7 @@ func CsrfToken() string {
 	return form.New()
 }
 
-// IsDirEmpty ...
-func IsDirEmpty(name string) bool {
-	files, _ := ioutil.ReadDir(name)
-	return len(files) > 0
-}
-
-// CopyFile ...
-func CopyFile(source, dest string) error {
-	if exists := Exists(source); !exists {
-		return nil
-	}
-	input, err := ioutil.ReadFile(source)
-	if err != nil {
-		return err
-	}
-
-	err = ioutil.WriteFile(dest, input, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// Exists does file or directory exists?
-func Exists(filename string) bool {
-	_, err := os.Stat(filename)
-	return os.IsNotExist(err)
+func internalError(ws *websocket.Conn, msg string, err error) {
+	fmt.Println(msg, err)
+	ws.WriteMessage(websocket.TextMessage, []byte("Internal server error."))
 }

@@ -1,0 +1,93 @@
+{{define "title"}}{{end}}
+{{define "head"}}
+<style>
+    .main {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-top: 20px;
+    }
+
+    .main form {
+        border: 1px solid lightgray;
+        padding: 6px;
+
+    }
+
+    .upload-btn-wrapper {
+        position: relative;
+        overflow: hidden;
+        display: inline-block;
+    }
+
+
+    .upload-btn-wrapper input[type=file] {
+        font-size: 100px;
+        position: absolute;
+        left: 0;
+        top: 0;
+        opacity: 0;
+    }
+</style>
+
+<script>
+</script>
+{{end}}
+
+{{define "body"}}
+{{template "nav" .}}
+<div class="main">
+    <form class="pure-form pure-form-stacked" action="/cmd/new" method="POST">
+        <fieldset>
+            <legend>Command</legend>
+            <div class="pure-control-group">
+                <div class="upload-btn-wrapper">
+                    <label for="cmd">Cmd:</label>
+                    <input id="cmd" type="text" placeholder="ping 192.168.0.111" name="cmd">
+                </div>
+            </div>
+
+            <div class="pure-control-group">
+                <div class="upload-btn-wrapper">
+                    <label for="dir">dir:</label>
+                    <input id="dir" type="text" name="dir" placeholder="./">
+                </div>
+            </div>
+
+            <br>
+            <div class="pure-controls">
+                <button type="submit" class="pure-button pure-button-primary" style="width: 132px;"><i class="fa fa-upload"></i>
+                    Run</button>
+            </div>
+        </fieldset>
+    </form>
+</div>
+{{end}}
+
+
+{{define "nav"}}
+<style>
+    nav {
+        padding: 5px;
+        border-bottom: 1px solid grey;
+        position: sticky;
+        top: 0;
+        right: 0;
+        left: 0;
+        display: flex;
+        align-items: stretch;
+    }
+
+    nav * {
+        margin: 4px;
+    }
+
+    .spacer {
+        width: 100%;
+    }
+</style>
+<nav>
+    <a href="/" class="pure-button"><i class="fas fa-home"></i> Home</a>
+    <span class="spacer">&nbsp;</span>
+</nav>
+{{end}}
