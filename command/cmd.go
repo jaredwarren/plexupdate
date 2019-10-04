@@ -111,6 +111,7 @@ func (c *Command) Start() {
 
 	// start cmd
 	err = cmd.Start()
+	c.Running = true
 	if err != nil {
 		panic(err)
 	}

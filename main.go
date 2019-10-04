@@ -94,7 +94,6 @@ func main() {
 	// Wait for signal.
 	fmt.Printf("\nexiting (%v)\n", <-exit)
 	fmt.Println("Good Bye!")
-
 }
 
 // CommandList ...
@@ -174,6 +173,8 @@ func Command(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("cmd Missing:" + cmdID))
 			return
 		}
+
+		fmt.Printf(" - %+v\n", cmd)
 
 		// load file contents first
 		fileData, _ := ioutil.ReadFile(cmd.LogFile)
