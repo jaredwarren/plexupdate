@@ -21,6 +21,7 @@
                 var item = document.createElement("div");
                 item.innerHTML = "<b>Connection closed.</b>";
                 appendLog(item);
+                document.getElementById("killBtn").style.display = "none"
             };
             conn.onmessage = function (evt) {
                 console.log(evt);
@@ -59,10 +60,12 @@
         }
     };
     function kill(){
-        if (!conn) {
-            return;
+        if (!!conn && conn.readyState <= 1) {
+            if(confirm("Are you sure?")){
+                conn.send("kill");
+            }
         }
-        conn.send("kill");
+        document.getElementById("killBtn").style.display = "none"
     }
 </script>
 {{end}}
@@ -114,7 +117,7 @@
 {{template "nav" .}}
 {{if .Cmd.Running}}
 <div style="padding: 4px;">
-    <button class="pure-button" onclick="kill()"><i class="fas fa-skull-crossbones"></i> KILL</button>
+    <button id="killBtn" class="pure-button" onclick="kill()"><i class="fas fa-skull-crossbones"></i> KILL</button>
 </div>
 {{end}}
 <pre id="log">{{.FileData}}</pre>

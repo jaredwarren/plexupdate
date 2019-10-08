@@ -66,3 +66,8 @@ func GetHash(n int) string {
 	}
 	return string(b)
 }
+
+// CsrfToken returns token
+func CsrfToken() string {
+	return New()
+}

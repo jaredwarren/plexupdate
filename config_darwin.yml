@@ -1,0 +1,6 @@
+
+plex:
+  locations:
+    video: ./OtherVideos
+    movies: ./Movies
+    music: ./Music

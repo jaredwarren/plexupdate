@@ -1,10 +1,7 @@
 package command
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +19,8 @@ type Command struct {
 	Cmd       *exec.Cmd
 	Pwd       string
 	StartTime time.Time
+
+	logHandler *os.File
 }
 
 // NewCommand return new command
@@ -57,6 +56,7 @@ func LoadFile(filePath string) (cmd *Command) {
 
 	cmd = &Command{
 		ID:        ID,
+		Running:   false, // assume not running
 		CmdString: cmdParts[0],
 		LogFile:   fmt.Sprintf("./logs/%s", filePath),
 	}
@@ -66,107 +66,45 @@ func LoadFile(filePath string) (cmd *Command) {
 // Start ...
 func (c *Command) Start() {
 	fmt.Println("  start cmd:", c.ID)
-	cmd := exec.Command("bash", "-c", c.CmdString)
+	c.Cmd = exec.Command("bash", "-c", c.CmdString)
 
 	// setup file
 	c.LogFile = fmt.Sprintf("./logs/%s.out", c.ID)
-	logFile, err := os.Create(c.LogFile)
+	logHandler, err := os.Create(c.LogFile)
+	c.logHandler = logHandler
 	if err != nil {
 		panic(err)
 	}
-	defer logFile.Close()
+	defer func() {
+		c.logHandler.Close()
+		c.logHandler = nil
+	}()
 
-	logFile.WriteString(fmt.Sprintf("Start:%s\n", c.StartTime.Format(time.RFC3339)))
-	logFile.WriteString(fmt.Sprintf("Command:%s\n\n", c.CmdString))
+	c.logHandler.WriteString(fmt.Sprintf("Start:%s\n", c.StartTime.Format(time.RFC3339)))
+	c.logHandler.WriteString(fmt.Sprintf("Command:%s\n\n", c.CmdString))
 
-	//
-	// use bufio if i need to write to ws and file
-	//
-
-	// r, w := io.Pipe()
-	// cmd.Stdout = w
-	// s := bufio.NewScanner(r)
-	// for s.Scan() {
-	// 	bytes := s.Bytes()
-	// 	outfile.Write(bytes)
-
-	// 	// TODO: write to ws if needed?
-
-	// 	// fmt.Println(string(s.Bytes()))
-	// 	// if err := ws.WriteMessage(websocket.TextMessage, s.Bytes()); err != nil {
-	// 	// 	fmt.Println("WriteMessage:", err)
-	// 	// 	ws.Close()
-	// 	// 	break
-	// 	// }
-	// }
-	// w.Close()
-
-	//
-	//
-	// just to file
-	//
-
-	// // open the out file for writing
-	cmd.Stdout = logFile
+	// open the out file for writing
+	c.Cmd.Stdout = c.logHandler
+	c.Cmd.Stderr = c.logHandler // not sure if this is a good idea??
 
 	// start cmd
-	err = cmd.Start()
+	err = c.Cmd.Start()
 	c.Running = true
 	if err != nil {
 		panic(err)
 	}
-	cmd.Wait()
+	c.Cmd.Wait()
 }
 
 // Close ...
 func (c *Command) Close() {
-	// TODO: rename file to "done"
-	// write to file done time
-
-	c.Cmd.Process.Kill()
-}
-
-// RunBash ...
-func RunBash(commandString, dir string, env []string) (stdOut string, err error) {
-	cmd := exec.Command("bash", "-c", commandString)
-	if len(env) > 0 {
-		cmd.Env = env
-	}
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	var stdOutBuf bytes.Buffer
-	var stdErrBuf bytes.Buffer
-	cmd.Stdout = &stdOutBuf
-	cmd.Stderr = &stdErrBuf
-	cmd.Run()
-	stdOut = strings.TrimSuffix(stdOutBuf.String(), "\n")
-	stdErr := strings.TrimSuffix(stdErrBuf.String(), "\n")
-	if stdErr != "" {
-		err = errors.New(stdErr)
-	}
-	return
-}
-
-// ScanBash ...
-func ScanBash(commandString, dir string, env []string) (cmd *exec.Cmd, outPipe, errPipe *bufio.Scanner) {
-	cmd = exec.Command("bash", "-c", commandString)
-	if len(env) > 0 {
-		cmd.Env = env
-	}
-	if dir != "" {
-		cmd.Dir = dir
+	// write to file done time, do first so file doesn't get closed
+	if c.logHandler != nil {
+		end := time.Now()
+		c.logHandler.WriteString(fmt.Sprintf("\n\n\nEnd:%s\n\nΔ:%+v\n", end.Format(time.RFC3339), end.Sub(c.StartTime)))
 	}
 
-	stdout, _ := cmd.StdoutPipe()
-	outPipe = bufio.NewScanner(stdout)
-
-	stderr, _ := cmd.StderrPipe()
-	errPipe = bufio.NewScanner(stderr)
-
-	cmd.Stdin = os.Stdin
-
-	go cmd.Run()
-
-	return
+	if c.Cmd != nil {
+		c.Cmd.Process.Kill()
+	}
 }
